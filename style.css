@@ -301,3 +301,4 @@ td select{height:32px;width:auto}
 .brilho.branco{background-image:linear-gradient(110deg,#fff 35%,#9cc3f5 50%,#fff 65%)}
 @keyframes brilho{from{background-position:100% 0}to{background-position:-150% 0}}
 @media (prefers-reduced-motion:reduce){.brilho{animation:none;color:var(--brand);background:none}.brilho.branco{color:#fff}}
+.passos{display:inline-block;text-align:left;margin:0 auto 16px;padding-left:20px;color:var(--text);line-height:1.8}

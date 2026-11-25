@@ -33,6 +33,7 @@ const ICONS = {
   live: '<circle cx="12" cy="12" r="3"/><path d="M6.3 6.3a8 8 0 0 0 0 11.4M17.7 6.3a8 8 0 0 1 0 11.4"/>',
   back: '<path d="m15 18-6-6 6-6"/>',
   city: '<path d="M4 21V8l8-5 8 5v13M9 21v-6h6v6M9 11h.01M15 11h.01"/>',
+  ext: '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>',
   history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/>',
 };
 const ico = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
@@ -267,6 +268,7 @@ function topbarHTML() {
       <div class="menu" id="menu" hidden>
         <div class="who"><b>${esc(S.me.nome)}</b><span>${esc(S.me.email)}</span><br><span class="badge ${S.me.role}">${ROLES[S.me.role]}</span></div><hr>
         <button id="bco">${ico('user')}Minha conta</button>
+        ${painel ? '' : `<button id="brad">${ico('ext')}Abrir ficha no Radar</button>`}
         ${isMaster() ? `<button id="bu">${ico('users')}Usuários</button>` : ''}
         ${tem ? `<hr><button id="br" class="danger">${ico('reset')}Zerar ou apagar ficha…</button>` : ''}
         <hr><button id="bo">${ico('logout')}Sair</button></div></div>
@@ -279,6 +281,7 @@ function bindTopbar() {
   $('#bTema').onclick = () => theme.toggle();
   $('#bo').onclick = () => sb.auth.signOut(); $('#bco').onclick = openConta;
   if ($('#bu')) $('#bu').onclick = () => openUsuarios();
+  if ($('#brad')) $('#brad').onclick = () => window.open(linkRadar(S.mun), '_blank', 'noopener');
   if ($('#bvp')) $('#bvp').onclick = irPainel;
   if ($('#bx')) $('#bx').onclick = exportCSV;
   if ($('#br')) $('#br').onclick = zerar;
@@ -289,6 +292,11 @@ function shell() { S.view === 'painel' && isMaster() ? renderPainel() : renderCh
 
 const credito = () => `<footer class="credito">Desenvolvido por <a href="https://lucas-souto-sites.vercel.app/" target="_blank" rel="noopener">Lucas Souto</a></footer>`;
 
+// link do Radar da Transparência já buscando a prefeitura do município aberto
+const linkRadar = m => {
+  const n = String(m.nome).trim(), q = 'prefeitura municipal de ' + n.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return 'https://radardatransparencia.atricon.org.br/painel-6/#q=' + encodeURIComponent(q) + (m.uf ? '&uf=' + encodeURIComponent(m.uf) : '') + '&mun=' + encodeURIComponent(n);
+};
 // ---------- painel do master ----------
 function renderPainel() {
   const rows = S.muns.map(m => {
@@ -396,7 +404,9 @@ function renderList() {
   if (!S.items.length) {
     el.innerHTML = `<div class="vazio"><div class="ic">${ico('file')}</div><h3>Nenhuma ficha importada</h3>
       <p>Importe o CSV da ficha do Radar da Transparência de <b>${esc(S.mun.nome)}</b> para começar. Cada critério vira um item do checklist, com as letras <b>D A S G F</b> prontas para marcar.</p>
-      <div class="actions"><button class="btn primary" id="bc2">${ico('upload')}Importar CSV da ficha</button><button class="btn" id="bm">${ico('download')}Baixar modelo de CSV</button></div>
+      <ol class="passos"><li><b>Abra a ficha da sua prefeitura no Radar</b> e baixe o CSV.</li><li><b>Importe o CSV</b> aqui.</li></ol>
+      <div class="actions"><a class="btn" id="br2" href="${linkRadar(S.mun)}" target="_blank" rel="noopener">${ico('ext')}1. Abrir ${esc(S.mun.nome)} no Radar</a><button class="btn primary" id="bc2">${ico('upload')}2. Importar CSV da ficha</button></div>
+      <p style="margin:10px auto 0"><button class="linkbtn" id="bm">Baixar modelo de CSV</button></p>
       <p style="margin:16px auto 0;font-size:12.5px">Formato: separador <code>;</code> e colunas <code>ciclo, dimensao, criterio, exigibilidade, Disponibilidade, Atualidade, Série Histórica, Gravação de Relatórios, Filtros de Pesquisa, autoavaliacao, evidencia</code>.</p></div>`;
     $('#bc2').onclick = () => $('#fcsv').click(); $('#bm').onclick = baixarModelo;
     return;
