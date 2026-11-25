@@ -155,10 +155,8 @@ grant select, update                 on public.profiles   to authenticated;
 grant select, insert, update, delete on public.criteria   to authenticated;
 grant select, insert, update, delete on public.tasks      to authenticated;
 grant select, insert                 on public.history    to authenticated;
--- projetos novos do Supabase não dão permissão automática em tabelas novas: concede explicitamente ao papel de serviço
-grant usage on schema public to authenticated, service_role;
-grant all on public.municipios, public.profiles, public.criteria, public.tasks, public.history to service_role;
-grant execute on function public.my_role(), public.my_municipio(), public.is_master() to authenticated, service_role;
+grant usage on schema public to authenticated;
+grant execute on function public.my_role(), public.my_municipio(), public.is_master() to authenticated;
 
 -- remove políticas antigas (versão anterior, de equipe única) e as atuais, para recriar
 drop policy if exists profiles_select      on public.profiles;
@@ -222,7 +220,7 @@ language sql stable security definer set search_path = public as $$
   order by m.nome
 $$;
 revoke all on function public.resumo_municipios() from public, anon;
-grant execute on function public.resumo_municipios() to authenticated, service_role;
+grant execute on function public.resumo_municipios() to authenticated;
 
 -- ---------- Tempo real ----------
 do $$
@@ -231,4 +229,15 @@ begin
 exception
   when duplicate_object then null;      -- já estava na publicação
   when undefined_object then null;      -- publicação inexistente (fora do Supabase)
+end $$;
+
+-- ---------- Permissões do papel de serviço ----------
+-- projetos novos do Supabase não dão permissão automática em tabelas novas: concede explicitamente ao papel de serviço
+do $$
+begin
+  if exists (select 1 from pg_roles where rolname = 'service_role') then
+    grant usage on schema public to service_role;
+    grant all on public.municipios, public.profiles, public.criteria, public.tasks, public.history to service_role;
+    grant execute on function public.my_role(), public.my_municipio(), public.is_master(), public.resumo_municipios() to service_role;
+  end if;
 end $$;
