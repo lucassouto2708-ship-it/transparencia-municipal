@@ -155,6 +155,10 @@ grant select, update                 on public.profiles   to authenticated;
 grant select, insert, update, delete on public.criteria   to authenticated;
 grant select, insert, update, delete on public.tasks      to authenticated;
 grant select, insert                 on public.history    to authenticated;
+-- projetos novos do Supabase não dão permissão automática em tabelas novas: concede explicitamente ao papel de serviço
+grant usage on schema public to authenticated, service_role;
+grant all on public.municipios, public.profiles, public.criteria, public.tasks, public.history to service_role;
+grant execute on function public.my_role(), public.my_municipio(), public.is_master() to authenticated, service_role;
 
 -- remove políticas antigas (versão anterior, de equipe única) e as atuais, para recriar
 drop policy if exists profiles_select      on public.profiles;
@@ -218,7 +222,7 @@ language sql stable security definer set search_path = public as $$
   order by m.nome
 $$;
 revoke all on function public.resumo_municipios() from public, anon;
-grant execute on function public.resumo_municipios() to authenticated;
+grant execute on function public.resumo_municipios() to authenticated, service_role;
 
 -- ---------- Tempo real ----------
 do $$
