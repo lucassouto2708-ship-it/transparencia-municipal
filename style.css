@@ -281,9 +281,16 @@ td select{height:32px;width:auto}
 .mut{color:var(--muted);font-size:13px}
 .badge.master{background:var(--brand-soft);color:var(--brand)} .badge.municipio{background:var(--na-soft);color:var(--na)}
 
-/* ---------- Crédito discreto ---------- */
-.credito{text-align:center;font-size:11.5px;color:var(--muted);opacity:.7;padding:8px 0 22px;transition:opacity .15s}
-.credito:hover{opacity:1}
-.credito a{color:inherit;text-decoration:none;border-bottom:1px dotted currentColor}
-.credito a:hover{color:var(--brand)}
+/* ---------- Crédito ---------- */
+.credito{text-align:center;font-size:13px;color:var(--brand);padding:10px 0 24px}
+.credito a{color:var(--brand);font-weight:600;text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--brand) 40%,transparent)}
+.credito a:hover{border-bottom-color:var(--brand)}
 .login .credito{padding:28px 0 0}
+.cred-branco{display:inline-block;margin-top:8px;font-size:13px;color:#fff}
+.cred-branco a{color:#fff;font-weight:600;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.5)}
+.cred-branco a:hover{border-bottom-color:#fff}
+.auth-brand small{font-size:12.5px}
+.cred-top{font-size:13px;color:var(--brand);text-decoration:none;padding:0 6px;white-space:nowrap}
+.cred-top b{font-weight:600}
+.cred-top:hover{text-decoration:underline}
+@media(max-width:760px){.cred-top{display:none}}

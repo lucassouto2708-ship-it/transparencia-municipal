@@ -185,7 +185,7 @@ function renderAuth(aviso = '') {
       <ul><li>${ico('upload')}<span>Importe o CSV da ficha do seu município</span></li>
           <li>${ico('check')}<span>Marque cada critério e subcritério (D A S G F)</span></li>
           <li>${ico('live')}<span>Seus dados ficam separados dos de outros municípios</span></li></ul></div>
-      <small>Radar da Transparência Pública · Atricon</small></aside>
+      <small>Radar da Transparência Pública · Atricon<br><span class="cred-branco">Desenvolvido por <a href="https://lucas-souto-sites.vercel.app/" target="_blank" rel="noopener">Lucas Souto</a></span></small></aside>
     <section class="auth-form"><form class="login" id="lf">
       <h2>Entrar</h2><p>Use o e-mail e a senha que você recebeu.</p>
       <label class="l" for="em">E-mail</label><input id="em" type="email" autocomplete="email" required>
@@ -258,6 +258,7 @@ function topbarHTML() {
   return `<header class="topbar"><div class="wrap">
     <div class="brand"><div class="logo">${ico('list')}</div><div><b>Checklist Transparência</b><small>${sub}</small></div></div>
     <span class="spacer"></span>
+    <a class="cred-top" href="https://lucas-souto-sites.vercel.app/" target="_blank" rel="noopener" title="Desenvolvido por Lucas Souto">por <b>Lucas Souto</b></a>
     ${!painel && isMaster() ? `<button class="btn" id="bvp" title="Voltar ao painel de municípios">${ico('back')}<span class="lbl">Painel</span></button>` : ''}
     ${painel ? '' : `<button class="btn primary" id="bc">${ico('upload')}<span class="lbl">Importar CSV</span></button><input type="file" id="fcsv" accept=".csv,text/csv" hidden>`}
     ${tem ? `<button class="btn" id="bx" title="Exportar andamento em CSV">${ico('download')}<span class="lbl">Exportar</span></button>` : ''}
