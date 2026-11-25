@@ -3,77 +3,88 @@
 Checklist colaborativo para a equipe trabalhar, em conjunto, nos critérios da ficha do **Radar da Transparência Pública** (Atricon).
 
 - **Front:** site estático (HTML + JS puro) publicado no **GitHub Pages**.
-- **Back:** **Supabase** (login, banco Postgres, regras de acesso e tempo real). Não há servidor para manter.
+- **Back:** **Supabase** (login, banco Postgres, regras de acesso, tempo real e uma função para criar usuários). Não há servidor para manter.
 
 ```
-index.html · app.js · style.css · config.js     ← site (GitHub Pages)
-supabase/schema.sql                             ← tabelas, regras de acesso (RLS) e gatilhos
-supabase/seed.sql                               ← carga da ficha 2026 (96 critérios)
-dados/ficha-2026.csv                            ← a ficha original (formato aceito no "Importar CSV")
+index.html · app.js · style.css · config.js          ← site (GitHub Pages)
+supabase/schema.sql                                  ← tabelas, regras de acesso (RLS) e gatilhos
+supabase/functions/gerenciar-usuarios/index.ts       ← função que permite ao admin criar/excluir usuários
+dados/modelo-ficha.csv                               ← modelo do CSV da ficha (formato aceito no "Importar CSV")
 ```
 
 ## Como funciona
 
+- **O app chega zerado**: não há critério nenhum. O administrador importa o CSV da ficha (botão **Importar CSV**) e cada critério vira um item do checklist.
 - Cada critério tem as letras **D A S G F** (Disponibilidade, Atualidade, Série histórica, Gravação, Filtros). Clique na letra para alternar **verde (atende) / vermelho (não atende)**. Letras **cinza** ("não se aplica" na validação) são travadas.
 - O **status** acompanha as letras: todas as aplicáveis verdes ⇒ *Concluído*; reabrir uma letra ⇒ *Em andamento*.
 - Cada critério ainda tem responsável, prazo, notas, link da correção e **histórico** de quem mudou o quê.
-- Tudo é salvo na hora e **aparece para a equipe em tempo real**.
-- Perfis: **Administrador** (importa CSV, zera o progresso, gerencia usuários) · **Editor** (altera o checklist) · **Somente leitura**.
+- Tudo é salvo na hora e **aparece para a equipe em tempo real**. O tema padrão é claro (há botão para o escuro).
+- Perfis: **Administrador** (importa CSV, zera/apaga a ficha, cria e gerencia usuários) · **Editor** (altera o checklist) · **Somente leitura**.
 
-## Publicar em 4 passos
+> Os dados são **compartilhados por projeto Supabase**: todos os usuários enxergam a mesma ficha. Para outro município/equipe com ficha própria, use outro projeto Supabase (e outro `config.js`).
+
+## Publicar em 6 passos
 
 ### 1) Criar o projeto no Supabase
-1. Entre em <https://supabase.com>, crie um projeto e guarde a senha do banco.
-2. Abra **SQL Editor → New query**, cole **todo** o conteúdo de `supabase/schema.sql` e clique em **Run**.
-3. Em outra query, cole `supabase/seed.sql` e clique em **Run** (carrega os 96 critérios de 2026).
-   Os dois scripts podem ser executados de novo sem duplicar nada.
+Entre em <https://supabase.com>, crie um projeto e guarde a senha do banco.
 
-### 2) Configurar o site
-Em **Project Settings → API** copie a **Project URL** e a **anon public key** para o `config.js`:
+### 2) Criar as tabelas
+Abra **SQL Editor → New query**, cole **todo** o conteúdo de `supabase/schema.sql` e clique em **Run**.
+(Pode ser executado de novo sem perder dados. **Não há carga de dados**: a ficha é importada pelo app.)
+
+### 3) Configurar o site
+Em **Project Settings → API Keys** copie a **Project URL** e a chave **anon / publishable** para o `config.js`:
 
 ```js
 window.APP_CONFIG = {
   SUPABASE_URL: "https://SEU-PROJETO.supabase.co",
-  SUPABASE_ANON_KEY: "eyJ..."
+  SUPABASE_ANON_KEY: "sb_publishable_... ou eyJ..."
 };
 ```
 
-> A *anon key* é pública por desenho: quem protege os dados são as regras RLS do `schema.sql`
-> (sem login, nada é lido ou gravado). **Nunca** use a chave `service_role` no site.
+> Essa chave é pública por desenho: quem protege os dados são as regras RLS do `schema.sql`
+> (sem login, nada é lido ou gravado). **Nunca** use a chave `secret` / `service_role` no site.
 
-### 3) Publicar no GitHub Pages
-No repositório: **Settings → Pages → Build and deployment → Source: *Deploy from a branch* → Branch: `main` / `(root)` → Save.**
-Em ~1 minuto o site fica em `https://SEU-USUARIO.github.io/transparencia-municipal/`.
+### 4) Publicar no GitHub Pages
+No repositório: **Settings → Pages → Source: *Deploy from a branch* → Branch: `main` / `(root)` → Save.**
+O site fica em `https://SEU-USUARIO.github.io/transparencia-municipal/`.
+No Supabase, em **Authentication → URL Configuration**, coloque essa URL em **Site URL** e em **Redirect URLs**.
 
-### 4) Liberar o login para o endereço do site
-No Supabase: **Authentication → URL Configuration**
-- **Site URL:** `https://SEU-USUARIO.github.io/transparencia-municipal/`
-- **Redirect URLs:** adicione a mesma URL (é usada nos e-mails de confirmação e de "esqueci a senha").
+### 5) Publicar a função que cria usuários
+É o que permite ao administrador **criar usuários direto no app** (a chave de serviço fica só no servidor do Supabase).
 
-## Primeiro acesso e equipe
+1. Supabase → **Edge Functions → Deploy a new function → Via Editor**.
+2. Nome da função: `gerenciar-usuarios` (exatamente assim).
+3. Apague o exemplo, cole **todo** o conteúdo de `supabase/functions/gerenciar-usuarios/index.ts` e clique em **Deploy function**.
 
-1. Abra o site e use **Criar conta**. **O primeiro usuário vira Administrador automaticamente.**
-2. As demais pessoas criam a própria conta e entram como *Somente leitura*; o administrador abre **Usuários** e muda para **Editor** (ou Administrador).
-3. Se preferir não ter cadastro aberto: **Authentication → Providers → Email → desative *Allow new users to sign up*** e convide as pessoas em **Authentication → Users → Invite user** (o perfil é criado do mesmo jeito).
-4. Se o e-mail de confirmação atrapalhar (limite de envios do plano gratuito), desative *Confirm email* em **Authentication → Providers → Email**.
+Sem esse passo o app funciona normalmente; só o botão "Criar usuário" mostra um aviso de que a função não foi publicada
+(as pessoas ainda podem criar a própria conta pela tela de login, e o admin ajusta o perfil).
 
-## Outros ciclos / nova ficha
+### 6) Primeiro acesso
+1. Abra o site, clique em **Criar conta** e use a sua. **O primeiro usuário vira Administrador automaticamente.**
+2. Se o e-mail de confirmação atrapalhar, desligue **Confirm email** em **Authentication → Providers → Email**.
+3. Clique em **Importar CSV** e escolha a ficha (use **Baixar modelo de CSV** para ver o formato).
+4. Abra o menu (seu nome, no canto) → **Usuários** → **Novo usuário** para cadastrar a equipe (nome, e-mail, senha inicial e perfil).
 
-Logado como administrador, clique em **Importar CSV** e escolha a ficha (mesmo formato de `dados/ficha-2026.csv`: separador `;`, colunas
-`ciclo, dimensao, criterio, exigibilidade, Disponibilidade, Atualidade, Série Histórica, Gravação de Relatórios, Filtros de Pesquisa, autoavaliacao, evidencia`).
-Critérios com o mesmo número no mesmo ciclo são atualizados **mantendo o andamento**; os novos começam pelo resultado da validação.
-Quando há mais de um ciclo, aparece um seletor no cabeçalho.
+## Formato do CSV
 
-## Segurança (resumo do que o banco garante)
+Separador `;` e as colunas:
+`ciclo, dimensao, criterio, exigibilidade, Disponibilidade, Atualidade, Série Histórica, Gravação de Relatórios, Filtros de Pesquisa, autoavaliacao, evidencia`
+(veja `dados/modelo-ficha.csv`). Cada letra vale `atende`, `não atende` ou `não se aplica`; o critério começa com o número (`1.1 Possui…`).
 
-| Quem | Lê | Altera andamento | Altera critérios/importa | Muda perfis |
+Importar de novo atualiza os critérios de mesmo número **mantendo o andamento**. Quando há mais de um ciclo, aparece um seletor no cabeçalho.
+Para recomeçar: menu → **Zerar ou apagar ficha…** (limpar progresso, voltar ao resultado do CSV ou apagar a ficha inteira).
+
+## Segurança (o que o banco garante)
+
+| Quem | Lê | Altera andamento | Importa/apaga ficha | Gerencia usuários |
 |---|---|---|---|---|
 | Sem login | — | — | — | — |
 | Somente leitura | sim | não | não | não |
 | Editor | sim | sim | não | não |
 | Administrador | sim | sim | sim | sim |
 
-Ninguém consegue promover a si mesmo. Excluir um usuário é feito no painel do Supabase (*Authentication → Users*).
+Ninguém consegue promover a si mesmo. A função `gerenciar-usuarios` confere no servidor que quem chama é administrador.
 
 ## Desenvolvimento local
 
