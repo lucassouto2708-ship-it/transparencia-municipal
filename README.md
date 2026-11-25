@@ -69,6 +69,10 @@ No Supabase, em **Authentication → URL Configuration**, coloque a URL do site 
 
 (Se já tinha publicado a versão anterior, **substitua o código** pelo atual e faça Deploy de novo.)
 
+**Se ao criar usuário aparecer erro de chave** (por exemplo *Invalid API key* ou *chave de serviço não está disponível*): o seu projeto usa as chaves novas do Supabase. Crie o segredo da função:
+1. **Project Settings → API Keys** → crie/copie a chave **secret** (`sb_secret_...`). Ela **nunca** vai no site, só aqui.
+2. **Edge Functions → Secrets → Add new secret**: nome `SB_SECRET_KEY`, valor = a chave secret. Salve (não precisa publicar de novo).
+
 ### 6) Primeiro acesso e cadastro dos municípios
 1. **Seu usuário master:** o primeiro usuário do projeto vira master automaticamente. Num projeto novo, crie-o em **Authentication → Users → Add user → Create new user** (marque *Auto Confirm User*).
 2. Entre no site: você cai no **Painel de municípios**. Clique em **Novo município** (ex.: *Mathias Lobato / MG*).

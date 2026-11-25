@@ -20,18 +20,24 @@ Deno.serve(async (req) => {
 
   try {
     const url = Deno.env.get("SUPABASE_URL");
-    const anon = Deno.env.get("SUPABASE_ANON_KEY");
-    const service = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    // chave pública (a mesma que o site usa; o supabase-js envia no cabeçalho "apikey") e chave de serviço do servidor
+    const publica = req.headers.get("apikey") ?? Deno.env.get("SUPABASE_ANON_KEY");
+    // Se o projeto usa as chaves novas, crie o segredo SB_SECRET_KEY (veja o README); senão vale a service_role padrão.
+    const service = Deno.env.get("SB_SECRET_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
     // 1) quem está chamando? (token do usuário logado)
-    const caller = createClient(url, anon, { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } });
+    const caller = createClient(url, publica, { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } });
     const { data: u, error: ue } = await caller.auth.getUser();
     if (ue || !u?.user) return json({ error: "Não autenticado" }, 401);
 
-    // 2) é o master?
-    const admin = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
-    const { data: me } = await admin.from("profiles").select("role").eq("id", u.user.id).maybeSingle();
+    // 2) é o master? Lido com a PRÓPRIA sessão de quem chamou (a regra de acesso deixa cada um ler o próprio perfil),
+    //    sem depender da chave de serviço. Se a leitura falhar, o erro real é mostrado (não vira "você não é master").
+    const { data: me, error: me_err } = await caller.from("profiles").select("role").eq("id", u.user.id).maybeSingle();
+    if (me_err) return json({ error: "Não foi possível ler o seu perfil: " + me_err.message }, 500);
     if (me?.role !== "master") return json({ error: "Apenas o administrador geral (master) pode gerenciar usuários." }, 403);
+
+    if (!service) return json({ error: "A chave de serviço não está disponível na função. Crie o segredo SB_SECRET_KEY (veja o README)." }, 500);
+    const admin = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
 
     const b = await req.json().catch(() => ({}));
 
@@ -46,7 +52,8 @@ Deno.serve(async (req) => {
       if (password.length < 8) return json({ error: "A senha precisa ter ao menos 8 caracteres." }, 400);
       if (role === "municipio") {
         if (!municipio_id) return json({ error: "Escolha o município do usuário." }, 400);
-        const { data: m } = await admin.from("municipios").select("id").eq("id", municipio_id).maybeSingle();
+        const { data: m, error: me2 } = await admin.from("municipios").select("id").eq("id", municipio_id).maybeSingle();
+        if (me2) return json({ error: "Falha ao consultar o município: " + me2.message }, 500);
         if (!m) return json({ error: "Município não encontrado." }, 400);
       }
 
