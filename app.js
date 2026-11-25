@@ -185,7 +185,7 @@ function renderAuth(aviso = '') {
       <ul><li>${ico('upload')}<span>Importe o CSV da ficha do seu município</span></li>
           <li>${ico('check')}<span>Marque cada critério e subcritério (D A S G F)</span></li>
           <li>${ico('live')}<span>Seus dados ficam separados dos de outros municípios</span></li></ul></div>
-      <small>Radar da Transparência Pública · Atricon<br><span class="cred-branco">Desenvolvido por <a href="https://lucas-souto-sites.vercel.app/" target="_blank" rel="noopener">Lucas Souto</a></span></small></aside>
+      <small>Radar da Transparência Pública · Atricon<br><span class="cred-branco">Desenvolvido por <a href="https://lucas-souto-sites.vercel.app/" target="_blank" rel="noopener"><span class="brilho branco">Lucas Souto</span></a></span></small></aside>
     <section class="auth-form"><form class="login" id="lf">
       <h2>Entrar</h2><p>Use o e-mail e a senha que você recebeu.</p>
       <label class="l" for="em">E-mail</label><input id="em" type="email" autocomplete="email" required>
@@ -257,8 +257,8 @@ function topbarHTML() {
     : `${esc(S.mun.nome)}${S.mun.uf ? ' / ' + esc(S.mun.uf) : ''}${S.ciclo ? ` · <span class="ciclo-txt">Ciclo</span> ${S.cycles.length > 1 ? `<select id="cy" aria-label="Ciclo">${S.cycles.map(c => `<option ${c == S.ciclo ? 'selected' : ''}>${c}</option>`).join('')}</select>` : S.ciclo}` : ''}`;
   return `<header class="topbar"><div class="wrap">
     <div class="brand"><div class="logo">${ico('list')}</div><div><b>Checklist Transparência</b><small>${sub}</small></div></div>
+    <a class="cred-top" href="https://lucas-souto-sites.vercel.app/" target="_blank" rel="noopener" title="Desenvolvido por Lucas Souto">por <b class="brilho">Lucas Souto</b></a>
     <span class="spacer"></span>
-    <a class="cred-top" href="https://lucas-souto-sites.vercel.app/" target="_blank" rel="noopener" title="Desenvolvido por Lucas Souto">por <b>Lucas Souto</b></a>
     ${!painel && isMaster() ? `<button class="btn" id="bvp" title="Voltar ao painel de municípios">${ico('back')}<span class="lbl">Painel</span></button>` : ''}
     ${painel ? '' : `<button class="btn primary" id="bc">${ico('upload')}<span class="lbl">Importar CSV</span></button><input type="file" id="fcsv" accept=".csv,text/csv" hidden>`}
     ${tem ? `<button class="btn" id="bx" title="Exportar andamento em CSV">${ico('download')}<span class="lbl">Exportar</span></button>` : ''}

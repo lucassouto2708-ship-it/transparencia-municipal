@@ -286,11 +286,18 @@ td select{height:32px;width:auto}
 .credito a{color:var(--brand);font-weight:600;text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--brand) 40%,transparent)}
 .credito a:hover{border-bottom-color:var(--brand)}
 .login .credito{padding:28px 0 0}
-.cred-branco{display:inline-block;margin-top:8px;font-size:13px;color:#fff}
+.cred-branco{display:inline-block;margin-top:10px;font-size:15px;color:#fff}
 .cred-branco a{color:#fff;font-weight:600;text-decoration:none;border-bottom:1px solid rgba(255,255,255,.5)}
 .cred-branco a:hover{border-bottom-color:#fff}
 .auth-brand small{font-size:12.5px}
-.cred-top{font-size:13px;color:var(--brand);text-decoration:none;padding:0 6px;white-space:nowrap}
+.cred-top{font-size:13px;color:var(--muted);text-decoration:none;white-space:nowrap;margin-left:6px;padding-left:14px;border-left:1px solid var(--line-strong);line-height:28px}
 .cred-top b{font-weight:600}
 .cred-top:hover{text-decoration:underline}
 @media(max-width:760px){.cred-top{display:none}}
+
+/* animação "shimmer" no nome (efeito de brilho que passa pelo texto, no estilo cult-ui) */
+.brilho{background:linear-gradient(110deg,var(--brand) 35%,#8fb8ef 50%,var(--brand) 65%);background-size:250% 100%;
+  -webkit-background-clip:text;background-clip:text;color:transparent;animation:brilho 3.2s linear infinite}
+.brilho.branco{background-image:linear-gradient(110deg,#fff 35%,#9cc3f5 50%,#fff 65%)}
+@keyframes brilho{from{background-position:100% 0}to{background-position:-150% 0}}
+@media (prefers-reduced-motion:reduce){.brilho{animation:none;color:var(--brand);background:none}.brilho.branco{color:#fff}}
