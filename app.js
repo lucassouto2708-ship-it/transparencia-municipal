@@ -194,7 +194,7 @@ function renderAuth(aviso = '') {
       <button class="btn primary" id="go">Entrar</button>
       <p style="margin:14px 0 0;text-align:center"><button type="button" class="linkbtn" id="fg">Esqueci a senha</button></p>
       <p style="font-size:12.5px;color:var(--muted);margin:18px 0 0;text-align:center">Não tem acesso? Peça ao administrador para criar o seu usuário.</p>
-    </form></section></div>`;
+    ${credito()}</form></section></div>`;
   const erro = m => { $('#le').textContent = m; $('#go').disabled = false; };
   $('#fg').onclick = async () => {
     const em = $('#em').value.trim(); if (!em) return erro('Informe o e-mail para recuperar a senha.');
@@ -286,6 +286,8 @@ function bindTopbar() {
 }
 function shell() { S.view === 'painel' && isMaster() ? renderPainel() : renderChecklist(); }
 
+const credito = () => `<footer class="credito">Desenvolvido por <a href="https://lucas-souto-sites.vercel.app/" target="_blank" rel="noopener">Lucas Souto</a></footer>`;
+
 // ---------- painel do master ----------
 function renderPainel() {
   const rows = S.muns.map(m => {
@@ -303,7 +305,7 @@ function renderPainel() {
     ${S.muns.length ? `<div class="tblwrap"><table class="tbl"><thead><tr><th>Município</th><th class="num2">Usuários</th><th class="num2">Critérios</th><th>Progresso</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
       : `<div class="vazio"><div class="ic">${ico('city')}</div><h3>Nenhum município cadastrado</h3><p>Crie o primeiro município e depois os usuários dele. Cada usuário só verá e editará a ficha do próprio município.</p>
         <div class="actions"><button class="btn primary" id="bnm2">${ico('plus')}Criar o primeiro município</button></div></div>`}
-  </main>`;
+  </main>${credito()}`;
   bindTopbar();
   $('#bu2').onclick = () => openUsuarios(); $('#bnm').onclick = novoMunicipio; if ($('#bnm2')) $('#bnm2').onclick = novoMunicipio;
   const t = $('.tbl'); if (t) t.addEventListener('click', async e => {
@@ -347,7 +349,7 @@ function renderChecklist() {
         <label class="chk"><input type="checkbox" id="fm" ${S.f.onlyMine ? 'checked' : ''}> Somente os meus</label>
         <button class="btn sm ghost" id="fx">Limpar filtros</button><button class="btn sm ghost" id="fo">Expandir tudo</button><button class="btn sm ghost" id="fc">Recolher tudo</button></div></div>
     <div class="legend"><span><b style="color:var(--text)">Letras:</b></span>${LETTERS.map(k => `<span><span class="flag na" style="cursor:default">${k}</span>${FL[k]}</span>`).join('')}</div>
-    <div id="list"></div>` : '<div id="list"></div>'}</main>`;
+    <div id="list"></div>` : '<div id="list"></div>'}</main>${credito()}`;
   bindTopbar();
   if (tem) {
     const b = (id, k, ev) => $(id).addEventListener(ev || 'input', e => { S.f[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; renderList(); });
