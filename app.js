@@ -31,6 +31,8 @@ const ICONS = {
   file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
   list: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4h6v3H9zM9 14l2 2 4-4"/>',
   live: '<circle cx="12" cy="12" r="3"/><path d="M6.3 6.3a8 8 0 0 0 0 11.4M17.7 6.3a8 8 0 0 1 0 11.4"/>',
+  back: '<path d="m15 18-6-6 6-6"/>',
+  city: '<path d="M4 21V8l8-5 8 5v13M9 21v-6h6v6M9 11h.01M15 11h.01"/>',
   history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/>',
 };
 const ico = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[n]}</svg>`;
@@ -42,7 +44,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const ST = { pendente: 'Pendente', andamento: 'Em andamento', concluido: 'Concluído', na: 'Não se aplica' };
 const FL = { D: 'Disponibilidade', A: 'Atualidade', S: 'Série histórica', G: 'Gravação de relatórios', F: 'Filtros de pesquisa' };
 const LETTERS = Object.keys(FL);
-const ROLES = { admin: 'Administrador', editor: 'Editor', viewer: 'Somente leitura' };
+const ROLES = { master: 'Administrador geral', municipio: 'Município' };
 const fmtDate = d => d ? d.split('-').reverse().join('/') : '';
 const fmtTs = t => t ? new Date(t).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '';
 const norm = x => String(x).trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -53,10 +55,10 @@ function toast(m) {
   const t = Object.assign(document.createElement('div'), { className: 'toast', textContent: m });
   document.body.append(t); setTimeout(() => t.remove(), 3600);
 }
-function modal(html) {   // diálogo próprio (confirm/alert nativos são bloqueados em previews embutidos)
+function modal(html, onClose) {   // diálogo próprio (confirm/alert nativos são bloqueados em previews embutidos)
   const o = document.createElement('div'); o.className = 'overlay';
   o.innerHTML = `<div class="box" role="dialog" aria-modal="true">${html}</div>`;
-  const close = () => o.remove();
+  const close = () => { if (!o.isConnected) return; o.remove(); if (onClose) onClose(); };
   o.addEventListener('mousedown', e => { if (e.target === o) close(); });
   o.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
   document.body.append(o); const f = $('input,select,button', o); if (f) f.focus();
@@ -79,9 +81,10 @@ const ask = (title, msg, okLabel, danger) => choose(title, msg, [{ v: 'ok', labe
 const cfg = window.APP_CONFIG || {};
 let sb = null;
 const FILTROS = { q: '', dim: '', exig: '', status: '', resp: '', onlyMine: false };
-const S = { me: null, profiles: [], items: [], ciclo: null, cycles: [], openDims: null, openItems: new Set(), channel: null, f: { ...FILTROS } };
-const canEdit = () => S.me && (S.me.role === 'admin' || S.me.role === 'editor');
-const isAdmin = () => S.me && S.me.role === 'admin';
+// me: usuário logado · mun: município aberto (o próprio, ou o que o master abriu) · view: 'painel' (só master) | 'checklist'
+const S = { me: null, mun: null, muns: [], resumo: {}, profiles: [], items: [], ciclo: null, cycles: [], view: 'checklist', openDims: null, openItems: new Set(), channel: null, f: { ...FILTROS } };
+const isMaster = () => !!S.me && S.me.role === 'master';
+const canEdit = () => !!S.me && !!S.mun;   // quem tem um município aberto marca o checklist
 const nomeDe = id => (S.profiles.find(p => p.id === id) || {}).nome || '';
 
 // ---------- letras D A S G F ----------
@@ -107,11 +110,12 @@ function nextStatus(i, t) {   // o status acompanha as letras
 
 // ---------- dados ----------
 const novaTask = i => ({ status: baseOk(i.f) ? 'concluido' : 'pendente', responsavel_id: null, prazo: null, notas: '', link: '', sub_state: '', updated_by_nome: null, updated_at: null });
-async function loadData() {
+async function loadData() {   // tudo filtrado pelo município aberto (o banco também só entrega o que a pessoa pode ver)
+  const mid = S.mun.id;
   const [c, t, p] = await Promise.all([
-    sb.from('criteria').select('*').order('ciclo', { ascending: false }).order('ordem'),
-    sb.from('tasks').select('*'),
-    sb.from('profiles').select('id,nome,email,role').order('nome')]);
+    sb.from('criteria').select('*').eq('municipio_id', mid).order('ciclo', { ascending: false }).order('ordem'),
+    sb.from('tasks').select('*').eq('municipio_id', mid),
+    sb.from('profiles').select('id,nome,email,role,municipio_id').eq('municipio_id', mid).order('nome')]);
   const err = c.error || t.error || p.error; if (err) throw err;
   S.profiles = p.data;
   S.cycles = [...new Set(c.data.map(r => r.ciclo))];
@@ -123,6 +127,11 @@ async function loadData() {
     i.t = tm.get(r.id) || novaTask(i);
     return i;
   });
+}
+async function loadPainel() {   // master: lista de municípios com o resumo de cada um
+  const [m, r] = await Promise.all([sb.from('municipios').select('*').order('nome'), sb.rpc('resumo_municipios')]);
+  if (m.error) throw m.error; if (r.error) throw r.error;
+  S.muns = m.data; S.resumo = Object.fromEntries((r.data || []).map(x => [x.municipio_id, x]));
 }
 function descreve(i, a, b) {
   const ch = [];
@@ -138,20 +147,21 @@ function descreve(i, a, b) {
   return ch.join('; ');
 }
 async function patchTask(i, patch, quiet) {
-  if (!canEdit()) { toast('Seu perfil é somente leitura.'); return; }
+  if (!canEdit()) return;
   const antes = i.t, depois = { ...antes, ...patch, updated_by_nome: S.me.nome, updated_at: new Date().toISOString() };
   const desc = descreve(i, antes, depois); if (!desc) return;
   i.t = depois; replaceItem(i);
-  const { error } = await sb.from('tasks').upsert({ criterio_id: i.id, status: depois.status, responsavel_id: depois.responsavel_id, prazo: depois.prazo || null,
+  const { error } = await sb.from('tasks').upsert({ criterio_id: i.id, municipio_id: S.mun.id, status: depois.status, responsavel_id: depois.responsavel_id, prazo: depois.prazo || null,
     notas: depois.notas, link: depois.link, sub_state: depois.sub_state, updated_by_nome: depois.updated_by_nome, updated_at: depois.updated_at }, { onConflict: 'criterio_id' });
   if (error) { i.t = antes; replaceItem(i); toast('Não foi possível salvar: ' + error.message); return; }
-  sb.from('history').insert({ criterio_id: i.id, user_id: S.me.id, user_nome: S.me.nome, changes: desc })
+  sb.from('history').insert({ criterio_id: i.id, municipio_id: S.mun.id, user_id: S.me.id, user_nome: S.me.nome, changes: desc })
     .then(() => { const h = $(`.item[data-id="${i.id}"] [data-hist]`); if (h) loadHistory(h, i.id); });   // atualiza o histórico já com a linha nova
   if (!quiet) toast('Salvo');
 }
-function assina() {   // tempo real: mudanças de outras pessoas aparecem sozinhas
-  if (S.channel) sb.removeChannel(S.channel);
-  S.channel = sb.channel('tasks-live').on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, p => {
+function assina() {   // tempo real: mudanças de outras pessoas do MESMO município aparecem sozinhas
+  if (S.channel) { sb.removeChannel(S.channel); S.channel = null; }
+  if (!S.mun) return;
+  S.channel = sb.channel('tasks-' + S.mun.id).on('postgres_changes', { event: '*', schema: 'public', table: 'tasks', filter: 'municipio_id=eq.' + S.mun.id }, p => {
     const r = p.new; if (!r || !r.criterio_id) return;
     const i = S.items.find(x => x.id === r.criterio_id); if (!i || r.updated_at === i.t.updated_at) return;
     i.t = r; const el = $(`.item[data-id="${i.id}"]`);
@@ -168,44 +178,39 @@ function renderSetup(msg) {
     <li>Em <b>Project Settings → API Keys</b>, copie a <b>Project URL</b> e a chave <b>anon / publishable</b> para o arquivo <code>config.js</code> e publique de novo.</li></ol>
     <p style="color:var(--muted)">Passo a passo completo no <code>README.md</code> do repositório.</p></div>`;
 }
-function renderAuth(modo = 'login', aviso = '') {
-  const cad = modo === 'cadastro';
+function renderAuth(aviso = '') {
   $('#app').innerHTML = `<div class="auth">
     <aside class="auth-brand"><div><div class="logo">${ico('list')}</div>
-      <h1>Checklist de Transparência</h1><p>Acompanhe, em equipe, cada critério do Radar da Transparência Pública.</p>
-      <ul><li>${ico('check')}<span>Cada critério com situação, responsável, prazo e notas</span></li>
-          <li>${ico('live')}<span>Alterações aparecem para toda a equipe em tempo real</span></li>
-          <li>${ico('history')}<span>Histórico de quem mudou o quê e quando</span></li></ul></div>
+      <h1>Checklist de Transparência</h1><p>Acompanhe cada critério do Radar da Transparência Pública do seu município.</p>
+      <ul><li>${ico('upload')}<span>Importe o CSV da ficha do seu município</span></li>
+          <li>${ico('check')}<span>Marque cada critério e subcritério (D A S G F)</span></li>
+          <li>${ico('live')}<span>Seus dados ficam separados dos de outros municípios</span></li></ul></div>
       <small>Radar da Transparência Pública · Atricon</small></aside>
     <section class="auth-form"><form class="login" id="lf">
-      <h2>${cad ? 'Criar conta' : 'Entrar'}</h2><p>${cad ? 'Preencha os dados para solicitar acesso.' : 'Use o e-mail e a senha da sua conta.'}</p>
-      <div class="tabs"><button type="button" data-m="login" class="${cad ? '' : 'on'}">Entrar</button><button type="button" data-m="cadastro" class="${cad ? 'on' : ''}">Criar conta</button></div>
-      ${cad ? '<label class="l" for="nm">Nome</label><input id="nm" type="text" autocomplete="name" required>' : ''}
+      <h2>Entrar</h2><p>Use o e-mail e a senha que você recebeu.</p>
       <label class="l" for="em">E-mail</label><input id="em" type="email" autocomplete="email" required>
-      <label class="l" for="pw">Senha${cad ? ' (mín. 8 caracteres)' : ''}</label><input id="pw" type="password" autocomplete="${cad ? 'new-password' : 'current-password'}" minlength="${cad ? 8 : 1}" required>
+      <label class="l" for="pw">Senha</label><input id="pw" type="password" autocomplete="current-password" required>
       <div class="err" id="le"></div>${aviso ? `<div class="msg">${esc(aviso)}</div>` : ''}
-      <button class="btn primary" id="go">${cad ? 'Criar conta' : 'Entrar'}</button>
-      ${cad ? '<p style="font-size:12.5px;color:var(--muted);margin:12px 0 0">Novas contas começam como “somente leitura”; um administrador libera a edição.</p>' : '<p style="margin:14px 0 0;text-align:center"><button type="button" class="linkbtn" id="fg">Esqueci a senha</button></p>'}
+      <button class="btn primary" id="go">Entrar</button>
+      <p style="margin:14px 0 0;text-align:center"><button type="button" class="linkbtn" id="fg">Esqueci a senha</button></p>
+      <p style="font-size:12.5px;color:var(--muted);margin:18px 0 0;text-align:center">Não tem acesso? Peça ao administrador para criar o seu usuário.</p>
     </form></section></div>`;
-  $('#lf').querySelectorAll('[data-m]').forEach(b => b.onclick = () => renderAuth(b.dataset.m));
   const erro = m => { $('#le').textContent = m; $('#go').disabled = false; };
-  if ($('#fg')) $('#fg').onclick = async () => {
+  $('#fg').onclick = async () => {
     const em = $('#em').value.trim(); if (!em) return erro('Informe o e-mail para recuperar a senha.');
     const { error } = await sb.auth.resetPasswordForEmail(em, { redirectTo: location.origin + location.pathname });
-    if (error) return erro(error.message); renderAuth('login', 'Enviamos um link para redefinir a senha, se o e-mail estiver cadastrado.');
+    if (error) return erro(error.message); renderAuth('Enviamos um link para redefinir a senha, se o e-mail estiver cadastrado.');
   };
   $('#lf').onsubmit = async e => {
     e.preventDefault(); $('#go').disabled = true; $('#le').textContent = '';
-    const email = $('#em').value.trim(), password = $('#pw').value;
-    if (cad) {
-      const { data, error } = await sb.auth.signUp({ email, password, options: { data: { nome: $('#nm').value.trim() } } });
-      if (error) return erro(error.message);
-      if (!data.session) return renderAuth('login', 'Conta criada! Confirme pelo link enviado ao seu e-mail e depois entre.');
-    } else {
-      const { error } = await sb.auth.signInWithPassword({ email, password });
-      if (error) return erro(error.message.includes('Invalid login') ? 'E-mail ou senha incorretos.' : error.message.includes('not confirmed') ? 'Confirme seu e-mail antes de entrar.' : error.message);
-    }
+    const { error } = await sb.auth.signInWithPassword({ email: $('#em').value.trim(), password: $('#pw').value });
+    if (error) erro(error.message.includes('Invalid login') ? 'E-mail ou senha incorretos.' : error.message.includes('not confirmed') ? 'Confirme seu e-mail antes de entrar.' : error.message);
   };
+}
+function renderSemMunicipio() {
+  $('#app').innerHTML = `<div class="setup"><h1>Conta sem município</h1><p>Seu usuário ainda não está vinculado a um município. Peça ao administrador para vincular a sua conta e entre de novo.</p>
+    <p><button class="btn" id="so">Sair</button></p></div>`;
+  $('#so').onclick = () => sb.auth.signOut();
 }
 let bootando = false;
 async function boot(user) {
@@ -215,37 +220,121 @@ async function boot(user) {
     const { data: me, error } = await sb.from('profiles').select('*').eq('id', user.id).maybeSingle();
     if (error) throw error;
     if (!me) throw new Error('Seu perfil não foi encontrado. Rode o supabase/schema.sql e entre de novo.');
-    S.me = me; await loadData(); assina();
-    if (!S.openDims) S.openDims = new Set(S.items.filter(i => i.t.status === 'pendente').map(i => i.dim));
-    shell();
+    S.me = me; S.f = { ...FILTROS }; S.openItems.clear(); S.openDims = null; S.mun = null; S.ciclo = null;
+    if (me.role === 'master') { S.view = 'painel'; await loadPainel(); return shell(); }
+    if (!me.municipio_id) return renderSemMunicipio();
+    const { data: m, error: em } = await sb.from('municipios').select('*').eq('id', me.municipio_id).maybeSingle();
+    if (em) throw em; if (!m) return renderSemMunicipio();
+    S.mun = m; S.view = 'checklist'; await loadData(); assina();
+    S.openDims = new Set(S.items.filter(i => i.t.status === 'pendente').map(i => i.dim)); shell();
   } catch (e) {
     $('#app').innerHTML = `<div class="setup"><h1>Não foi possível carregar</h1><p>${esc(e.message || e)}</p><p><button class="btn" id="rt">Tentar de novo</button> <button class="btn" id="so">Sair</button></p></div>`;
     $('#rt').onclick = () => location.reload(); $('#so').onclick = () => sb.auth.signOut();
   } finally { bootando = false; }
 }
+async function abrirMunicipio(id) {   // (master) abre a ficha de um município
+  S.mun = S.muns.find(m => m.id === id); if (!S.mun) return;
+  S.ciclo = null; S.openItems.clear(); S.f = { ...FILTROS }; S.view = 'checklist';
+  try { await loadData(); } catch (e) { return toast('Erro ao abrir: ' + e.message); }
+  assina(); S.openDims = new Set(S.items.filter(i => i.t.status === 'pendente').map(i => i.dim)); shell(); window.scrollTo(0, 0);
+}
+async function irPainel() {
+  if (S.channel) { sb.removeChannel(S.channel); S.channel = null; }
+  S.mun = null; S.view = 'painel'; S.items = []; S.openItems.clear();
+  try { await loadPainel(); } catch (e) { toast('Erro: ' + e.message); }
+  shell(); window.scrollTo(0, 0);
+}
 
-// ---------- tela principal ----------
+// ---------- cabeçalho (comum ao painel e ao checklist) ----------
 const counted = a => a.filter(i => i.t.status !== 'na');
 const done = a => a.filter(i => i.t.status === 'concluido').length;
 const pct = a => { const c = counted(a); return c.length ? Math.round(100 * done(c) / c.length) : 0; };
 const dimsOf = () => [...new Set(S.items.map(i => i.dim))];
 
-function shell() {
-  const dims = dimsOf(), tem = S.items.length > 0;
-  $('#app').innerHTML = `<header class="topbar"><div class="wrap">
-    <div class="brand"><div class="logo">${ico('list')}</div>
-      <div><b>Checklist Transparência</b><small>Radar da Transparência Pública${S.ciclo ? ` · <span class="ciclo-txt">Ciclo</span> ${S.cycles.length > 1 ? `<select id="cy" aria-label="Ciclo">${S.cycles.map(c => `<option ${c == S.ciclo ? 'selected' : ''}>${c}</option>`).join('')}</select>` : S.ciclo}` : ''}</small></div></div>
+function topbarHTML() {
+  const painel = S.view === 'painel', tem = !painel && S.items.length > 0;
+  const sub = painel ? 'Painel do administrador geral'
+    : `${esc(S.mun.nome)}${S.mun.uf ? ' / ' + esc(S.mun.uf) : ''}${S.ciclo ? ` · <span class="ciclo-txt">Ciclo</span> ${S.cycles.length > 1 ? `<select id="cy" aria-label="Ciclo">${S.cycles.map(c => `<option ${c == S.ciclo ? 'selected' : ''}>${c}</option>`).join('')}</select>` : S.ciclo}` : ''}`;
+  return `<header class="topbar"><div class="wrap">
+    <div class="brand"><div class="logo">${ico('list')}</div><div><b>Checklist Transparência</b><small>${sub}</small></div></div>
     <span class="spacer"></span>
-    ${isAdmin() ? `<button class="btn primary" id="bc">${ico('upload')}<span class="lbl">Importar CSV</span></button><input type="file" id="fcsv" accept=".csv,text/csv" hidden>` : ''}
+    ${!painel && isMaster() ? `<button class="btn" id="bvp" title="Voltar ao painel de municípios">${ico('back')}<span class="lbl">Painel</span></button>` : ''}
+    ${painel ? '' : `<button class="btn primary" id="bc">${ico('upload')}<span class="lbl">Importar CSV</span></button><input type="file" id="fcsv" accept=".csv,text/csv" hidden>`}
     ${tem ? `<button class="btn" id="bx" title="Exportar andamento em CSV">${ico('download')}<span class="lbl">Exportar</span></button>` : ''}
     <button class="btn iconbtn" id="bTema" title="${theme.label()}" aria-label="${theme.label()}">${theme.icon()}</button>
     <div class="menuwrap"><button class="usr" id="bMenu" aria-haspopup="true" aria-expanded="false"><span class="avatar">${esc(iniciais(S.me.nome))}</span><span class="nm">${esc(S.me.nome)}</span>${ico('down')}</button>
       <div class="menu" id="menu" hidden>
         <div class="who"><b>${esc(S.me.nome)}</b><span>${esc(S.me.email)}</span><br><span class="badge ${S.me.role}">${ROLES[S.me.role]}</span></div><hr>
         <button id="bco">${ico('user')}Minha conta</button>
-        ${isAdmin() ? `<button id="bu">${ico('users')}Usuários</button>${tem ? `<hr><button id="br" class="danger">${ico('reset')}Zerar ou apagar ficha…</button>` : ''}` : ''}
+        ${isMaster() ? `<button id="bu">${ico('users')}Usuários</button>` : ''}
+        ${tem ? `<hr><button id="br" class="danger">${ico('reset')}Zerar ou apagar ficha…</button>` : ''}
         <hr><button id="bo">${ico('logout')}Sair</button></div></div>
-  </div></header>
+  </div></header>`;
+}
+function bindTopbar() {
+  const mn = $('#menu'), bm = $('#bMenu'), fechaMenu = () => { mn.hidden = true; bm.setAttribute('aria-expanded', 'false'); };
+  bm.onclick = e => { e.stopPropagation(); mn.hidden = !mn.hidden; bm.setAttribute('aria-expanded', String(!mn.hidden)); };
+  mn.addEventListener('click', fechaMenu);
+  $('#bTema').onclick = () => theme.toggle();
+  $('#bo').onclick = () => sb.auth.signOut(); $('#bco').onclick = openConta;
+  if ($('#bu')) $('#bu').onclick = () => openUsuarios();
+  if ($('#bvp')) $('#bvp').onclick = irPainel;
+  if ($('#bx')) $('#bx').onclick = exportCSV;
+  if ($('#br')) $('#br').onclick = zerar;
+  if ($('#bc')) { $('#bc').onclick = () => $('#fcsv').click(); $('#fcsv').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) importCSV(f); }; }
+  if ($('#cy')) $('#cy').onchange = async e => { S.ciclo = +e.target.value; S.openItems.clear(); await loadData(); S.openDims = new Set(S.items.filter(i => i.t.status === 'pendente').map(i => i.dim)); shell(); };
+}
+function shell() { S.view === 'painel' && isMaster() ? renderPainel() : renderChecklist(); }
+
+// ---------- painel do master ----------
+function renderPainel() {
+  const rows = S.muns.map(m => {
+    const r = S.resumo[m.id] || { criterios: 0, concluidos: 0, na: 0, usuarios: 0 }, base = r.criterios - r.na, p = base > 0 ? Math.round(100 * r.concluidos / base) : 0;
+    return `<tr><td><b>${esc(m.nome)}</b>${m.uf ? ` <span class="uf">${esc(m.uf)}</span>` : ''}</td>
+      <td class="num2">${r.usuarios}</td><td class="num2">${r.criterios || '—'}</td>
+      <td style="min-width:150px">${r.criterios ? `<div class="mprog"><span class="bar"><i style="width:${p}%"></i></span><b>${p}%</b></div>` : '<span class="mut">Sem ficha importada</span>'}</td>
+      <td style="text-align:right;white-space:nowrap"><button class="btn sm primary" data-abrir="${m.id}">Abrir</button>
+        <button class="btn sm" data-usr="${m.id}" title="Usuários deste município">${ico('users')}</button>
+        <button class="btn sm danger" data-delm="${m.id}" title="Excluir município" aria-label="Excluir ${esc(m.nome)}">${ico('trash')}</button></td></tr>`;
+  }).join('');
+  $('#app').innerHTML = `${topbarHTML()}<main class="wrap">
+    <div class="pagehead"><div><h2>Municípios</h2><p>Cada município enxerga e edita somente a própria ficha. Você tem acesso a todas.</p></div>
+      <div class="actions" style="margin:0"><button class="btn" id="bu2">${ico('users')}Usuários</button><button class="btn primary" id="bnm">${ico('plus')}Novo município</button></div></div>
+    ${S.muns.length ? `<div class="tblwrap"><table class="tbl"><thead><tr><th>Município</th><th class="num2">Usuários</th><th class="num2">Critérios</th><th>Progresso</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<div class="vazio"><div class="ic">${ico('city')}</div><h3>Nenhum município cadastrado</h3><p>Crie o primeiro município e depois os usuários dele. Cada usuário só verá e editará a ficha do próprio município.</p>
+        <div class="actions"><button class="btn primary" id="bnm2">${ico('plus')}Criar o primeiro município</button></div></div>`}
+  </main>`;
+  bindTopbar();
+  $('#bu2').onclick = () => openUsuarios(); $('#bnm').onclick = novoMunicipio; if ($('#bnm2')) $('#bnm2').onclick = novoMunicipio;
+  const t = $('.tbl'); if (t) t.addEventListener('click', async e => {
+    const ab = e.target.closest('[data-abrir]'), us = e.target.closest('[data-usr]'), dl = e.target.closest('[data-delm]');
+    if (ab) return abrirMunicipio(+ab.dataset.abrir);
+    if (us) return openUsuarios(+us.dataset.usr);
+    if (dl) {
+      const m = S.muns.find(x => x.id === +dl.dataset.delm); if (!m) return;
+      if (!await ask('Excluir município', `Excluir <b>${esc(m.nome)}</b>? A ficha, o andamento e o histórico desse município serão apagados. Os usuários dele continuam existindo, mas ficam sem município.`, 'Excluir município', true)) return;
+      const { error } = await sb.from('municipios').delete().eq('id', m.id); if (error) return toast('Erro: ' + error.message);
+      await loadPainel(); renderPainel(); toast('Município excluído');
+    }
+  });
+}
+function novoMunicipio() {
+  const m = modal(`<h2>Novo município</h2><form id="fm"><label class="l" for="mn">Nome do município</label><input id="mn" type="text" required autocomplete="off" placeholder="Ex.: Mathias Lobato">
+    <label class="l" for="mu">UF (opcional)</label><input id="mu" type="text" maxlength="2" autocomplete="off" placeholder="MG" style="text-transform:uppercase;width:90px">
+    <div class="err" id="me"></div><div class="actions"><button class="btn primary" id="mc">Criar município</button><button class="btn ghost" type="button" id="mx">Cancelar</button></div></form>`);
+  $('#mx', m.el).onclick = m.close;
+  $('#fm', m.el).onsubmit = async e => {
+    e.preventDefault(); const nome = $('#mn', m.el).value.trim(), uf = $('#mu', m.el).value.trim().toUpperCase() || null;
+    const { error } = await sb.from('municipios').insert({ nome, uf });
+    if (error) return $('#me', m.el).textContent = /duplicate|unique|municipios_nome_uk/i.test(error.message) ? 'Já existe um município com esse nome.' : error.message;
+    m.close(); await loadPainel(); renderPainel(); toast('Município criado');
+  };
+}
+
+// ---------- checklist ----------
+function renderChecklist() {
+  const dims = dimsOf(), tem = S.items.length > 0;
+  $('#app').innerHTML = `${topbarHTML()}
   <main class="wrap">${tem ? `
     <div class="pagehead"><div><h2>Critérios da ficha</h2><p>Clique nas letras <b>D A S G F</b> para marcar cada subcritério como atende (verde) ou não atende (vermelho).</p></div></div>
     <section class="summary" id="sum"></section>
@@ -259,18 +348,7 @@ function shell() {
         <button class="btn sm ghost" id="fx">Limpar filtros</button><button class="btn sm ghost" id="fo">Expandir tudo</button><button class="btn sm ghost" id="fc">Recolher tudo</button></div></div>
     <div class="legend"><span><b style="color:var(--text)">Letras:</b></span>${LETTERS.map(k => `<span><span class="flag na" style="cursor:default">${k}</span>${FL[k]}</span>`).join('')}</div>
     <div id="list"></div>` : '<div id="list"></div>'}</main>`;
-  const mn = $('#menu'), bm = $('#bMenu'), fechaMenu = () => { mn.hidden = true; bm.setAttribute('aria-expanded', 'false'); };
-  bm.onclick = e => { e.stopPropagation(); mn.hidden = !mn.hidden; bm.setAttribute('aria-expanded', String(!mn.hidden)); };
-  mn.addEventListener('click', fechaMenu);
-  $('#bTema').onclick = () => theme.toggle();
-  $('#bo').onclick = () => sb.auth.signOut(); $('#bco').onclick = openConta;
-  if ($('#bx')) $('#bx').onclick = exportCSV;
-  if ($('#cy')) $('#cy').onchange = async e => { S.ciclo = +e.target.value; S.openItems.clear(); await loadData(); shell(); };
-  if (isAdmin()) {
-    $('#bc').onclick = () => $('#fcsv').click();
-    $('#fcsv').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) importCSV(f); };
-    $('#bu').onclick = openUsuarios; if ($('#br')) $('#br').onclick = zerar;
-  }
+  bindTopbar();
   if (tem) {
     const b = (id, k, ev) => $(id).addEventListener(ev || 'input', e => { S.f[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; renderList(); });
     b('#fq', 'q'); b('#fd', 'dim', 'change'); b('#fe', 'exig', 'change'); b('#fr', 'resp', 'change'); b('#fm', 'onlyMine', 'change');
@@ -314,11 +392,10 @@ function renderList() {
   const el = $('#list'); if (!el) return;
   if (!S.items.length) {
     el.innerHTML = `<div class="vazio"><div class="ic">${ico('file')}</div><h3>Nenhuma ficha importada</h3>
-      ${isAdmin() ? `<p>Importe o CSV da sua ficha do Radar da Transparência para começar. Cada critério vira um item do checklist, com as letras <b>D A S G F</b> prontas para marcar.</p>
-        <div class="actions"><button class="btn primary" id="bc2">${ico('upload')}Importar CSV da ficha</button><button class="btn" id="bm">${ico('download')}Baixar modelo de CSV</button></div>
-        <p style="margin:16px auto 0;font-size:12.5px">Formato: separador <code>;</code> e colunas <code>ciclo, dimensao, criterio, exigibilidade, Disponibilidade, Atualidade, Série Histórica, Gravação de Relatórios, Filtros de Pesquisa, autoavaliacao, evidencia</code>.</p>`
-        : '<p>Ainda não há critérios cadastrados. Peça a um administrador para importar o CSV da ficha.</p>'}</div>`;
-    if (isAdmin()) { $('#bc2').onclick = () => $('#fcsv').click(); $('#bm').onclick = baixarModelo; }
+      <p>Importe o CSV da ficha do Radar da Transparência de <b>${esc(S.mun.nome)}</b> para começar. Cada critério vira um item do checklist, com as letras <b>D A S G F</b> prontas para marcar.</p>
+      <div class="actions"><button class="btn primary" id="bc2">${ico('upload')}Importar CSV da ficha</button><button class="btn" id="bm">${ico('download')}Baixar modelo de CSV</button></div>
+      <p style="margin:16px auto 0;font-size:12.5px">Formato: separador <code>;</code> e colunas <code>ciclo, dimensao, criterio, exigibilidade, Disponibilidade, Atualidade, Série Histórica, Gravação de Relatórios, Filtros de Pesquisa, autoavaliacao, evidencia</code>.</p></div>`;
+    $('#bc2').onclick = () => $('#fcsv').click(); $('#bm').onclick = baixarModelo;
     return;
   }
   const filt = JSON.stringify(S.f) !== JSON.stringify(FILTROS);
@@ -334,7 +411,7 @@ function chipsHTML(i) {
   return LETTERS.map(k => {
     const ok = isOk(i, k);
     if (ok === null) return `<span class="flag na" title="${FL[k]}: não se aplica — não precisa ser preenchido">${k}</span>`;
-    return `<button type="button" class="flag ${ok ? 'atende' : 'nao'}" data-flag="${k}" data-stop ${canEdit() ? '' : 'disabled'} aria-pressed="${ok}" title="${FL[k]}: ${ok ? 'atende' : 'não atende'} — clique para alternar verde/vermelho">${k}</button>`;
+    return `<button type="button" class="flag ${ok ? 'atende' : 'nao'}" data-flag="${k}" data-stop aria-pressed="${ok}" title="${FL[k]}: ${ok ? 'atende' : 'não atende'} — clique para alternar verde/vermelho">${k}</button>`;
   }).join('');
 }
 function itemHTML(i) {
@@ -343,21 +420,21 @@ function itemHTML(i) {
     <div><div class="title">${esc(i.c)}</div><div class="meta"><span class="pill ${slug(i.e)}">${esc(i.e)}</span>
     ${resp ? `<span>Resp.: ${esc(resp)}</span>` : ''}${t.prazo ? `<span>Prazo: ${fmtDate(t.prazo)}</span>` : ''}${t.notas ? '<span class="tag">Notas</span>' : ''}</div></div>
     <div class="flags">${chipsHTML(i)}</div>
-    <div class="st ${t.status}" data-stop><select data-status ${canEdit() ? '' : 'disabled'} aria-label="Status do critério ${esc(i.n)}">${Object.entries(ST).map(([k, v]) => `<option value="${k}" ${k === t.status ? 'selected' : ''}>${v}</option>`).join('')}</select>
+    <div class="st ${t.status}" data-stop><select data-status aria-label="Status do critério ${esc(i.n)}">${Object.entries(ST).map(([k, v]) => `<option value="${k}" ${k === t.status ? 'selected' : ''}>${v}</option>`).join('')}</select>
     ${t.updated_by_nome ? `<small>${esc(t.updated_by_nome)} · ${fmtTs(t.updated_at)}</small>` : ''}</div></div>
     <div class="detail">${open ? detailHTML(i) : ''}</div></div>`;
 }
 function detailHTML(i) {
-  const t = i.t, ro = canEdit() ? '' : 'disabled';
+  const t = i.t;
   return `<h4>Subcritérios</h4>
   <div class="subs">${LETTERS.map(k => { const cur = effFlag(i, k);
-    const seg = (v, label) => `<button type="button" data-flag="${k}" data-val="${v}" class="${cur === v ? 'on ' + v : ''}" aria-pressed="${cur === v}" ${ro}>${label}</button>`;
+    const seg = (v, label) => `<button type="button" data-flag="${k}" data-val="${v}" class="${cur === v ? 'on ' + v : ''}" aria-pressed="${cur === v}">${label}</button>`;
     return `<div class="subrow"><span class="subname"><b class="${cur}">${k}</b>${FL[k]}</span><span class="seg">${cur === 'n' ? '<span class="na-note">Não se aplica — não precisa ser preenchido</span>' : seg('g', 'Atende') + seg('r', 'Não atende')}</span></div>`; }).join('')}</div>
-  <div class="grid2"><div><h4>Responsável</h4><select data-f="responsavel_id" ${ro}><option value="">— sem responsável —</option>${S.profiles.map(u => `<option value="${u.id}" ${u.id === t.responsavel_id ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
-  <div><h4>Prazo</h4><input type="date" data-f="prazo" value="${t.prazo || ''}" ${ro}></div></div>
-  <h4>Link da correção / evidência</h4><input type="text" data-f="link" value="${esc(t.link)}" placeholder="https://…" ${ro}>
-  <h4>Notas</h4><textarea data-f="notas" ${ro}>${esc(t.notas)}</textarea>
-  ${ro ? '' : '<div class="actions"><button class="btn primary" data-save>Salvar alterações</button></div>'}
+  <div class="grid2"><div><h4>Responsável</h4><select data-f="responsavel_id"><option value="">— sem responsável —</option>${S.profiles.map(u => `<option value="${u.id}" ${u.id === t.responsavel_id ? 'selected' : ''}>${esc(u.nome)}</option>`).join('')}</select></div>
+  <div><h4>Prazo</h4><input type="date" data-f="prazo" value="${t.prazo || ''}"></div></div>
+  <h4>Link da correção / evidência</h4><input type="text" data-f="link" value="${esc(t.link)}" placeholder="https://…">
+  <h4>Notas</h4><textarea data-f="notas">${esc(t.notas)}</textarea>
+  <div class="actions"><button class="btn primary" data-save>Salvar alterações</button></div>
   <h4>Evidências da validação</h4><div class="links">${i.ev.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>`).join('') || '—'}</div>
   <h4>Histórico</h4><ul class="hist" data-hist><li>carregando…</li></ul>`;
 }
@@ -381,7 +458,6 @@ document.addEventListener('click', e => {
   const i = S.items.find(x => x.id === +el.dataset.id); if (!i) return;
   const fl = e.target.closest('[data-flag]');
   if (fl) {
-    if (fl.disabled) return;
     const k = fl.dataset.flag, sub_state = setFlag(i, k, fl.dataset.val || (isOk(i, k) === true ? 'r' : 'g'));
     patchTask(i, { sub_state, status: nextStatus(i, { ...i.t, sub_state }) }, true); return;
   }
@@ -400,26 +476,26 @@ document.addEventListener('change', e => {
   const i = S.items.find(x => x.id === +e.target.closest('.item').dataset.id); if (i) patchTask(i, { status: e.target.value }, true);
 });
 
-// ---------- administração ----------
+// ---------- zerar, importar e exportar (cada um só mexe na ficha do próprio município) ----------
 async function zerar() {
-  const op = await choose('Zerar ou apagar a ficha', `Ações sobre os <b>${S.items.length} critérios do ciclo ${S.ciclo}</b>, para toda a equipe. Não dá para desfazer.`,
-    [{ v: 'tudo', label: 'Limpar progresso (todos pendentes e vermelhos)', cls: 'danger' }, { v: 'csv', label: 'Voltar ao resultado da validação do CSV' },
-     { v: 'apagar', label: 'Apagar a ficha inteira (volta a ficar sem critérios)', cls: 'danger' }]);
+  const op = await choose('Zerar ou apagar a ficha', `Ações sobre os <b>${S.items.length} critérios do ciclo ${S.ciclo}</b> de <b>${esc(S.mun.nome)}</b>. Não afeta nenhum outro município e não dá para desfazer.`,
+    [{ v: 'tudo', label: 'Limpar marcações (todos pendentes e vermelhos)', cls: 'danger' }, { v: 'csv', label: 'Voltar ao resultado do CSV importado' },
+     { v: 'apagar', label: 'Apagar a ficha importada (para importar outra)', cls: 'danger' }]);
   if (!op) return;
   if (op === 'apagar') {
-    if (!await ask('Apagar a ficha inteira?', `Todos os critérios do ciclo ${S.ciclo}, com andamento e histórico, serão excluídos. Depois você poderá importar outro CSV.`, 'Apagar tudo', true)) return;
-    const { error } = await sb.from('criteria').delete().eq('ciclo', S.ciclo);
+    if (!await ask('Apagar a ficha importada?', `Todos os critérios do ciclo ${S.ciclo}, com andamento e histórico, serão excluídos. Depois você poderá importar o CSV certo.`, 'Apagar a ficha', true)) return;
+    const { error } = await sb.from('criteria').delete().eq('municipio_id', S.mun.id).eq('ciclo', S.ciclo);
     if (error) return toast('Erro ao apagar: ' + error.message);
     S.openItems.clear(); S.f = { ...FILTROS }; S.ciclo = null; await loadData(); S.openDims = new Set(); shell(); return toast('Ficha apagada');
   }
   const agora = new Date().toISOString();
-  const rows = S.items.map(i => ({ criterio_id: i.id, status: op === 'tudo' ? 'pendente' : (baseOk(i.f) ? 'concluido' : 'pendente'), responsavel_id: null, prazo: null, notas: '', link: '',
+  const rows = S.items.map(i => ({ criterio_id: i.id, municipio_id: S.mun.id, status: op === 'tudo' ? 'pendente' : (baseOk(i.f) ? 'concluido' : 'pendente'), responsavel_id: null, prazo: null, notas: '', link: '',
     sub_state: op === 'tudo' ? LETTERS.filter(k => i.f[k] === 'atende' || i.f[k] === 'não atende').map(k => k + ':r').join(',') : '', updated_by_nome: S.me.nome, updated_at: agora }));
   const { error } = await sb.from('tasks').upsert(rows, { onConflict: 'criterio_id' });
   if (error) return toast('Erro ao zerar: ' + error.message);
   rows.forEach(r => { S.items.find(i => i.id === r.criterio_id).t = r; });
   S.openItems.clear(); S.openDims = new Set(S.items.filter(i => i.t.status === 'pendente').map(i => i.dim));
-  S.f = { ...FILTROS }; shell(); window.scrollTo(0, 0); toast('Progresso zerado');
+  S.f = { ...FILTROS }; shell(); window.scrollTo(0, 0); toast('Marcações zeradas');
 }
 function parseCSV(text, sep = ';') {
   text = text.replace(/^﻿/, '');
@@ -445,16 +521,16 @@ async function importCSV(file) {
   const novo = [];
   rows.forEach(r => {
     const m = get(r, 'criterio').match(/^(\d+\.\d+)\.?\s*(.*)$/s); if (!m) return;
-    novo.push({ ciclo: parseInt(get(r, 'ciclo'), 10) || S.ciclo || new Date().getFullYear(), ordem: novo.length, dimensao: get(r, 'dimensao'), num: m[1], criterio: m[2], exigibilidade: get(r, 'exigibilidade'),
+    novo.push({ municipio_id: S.mun.id, ciclo: parseInt(get(r, 'ciclo'), 10) || S.ciclo || new Date().getFullYear(), ordem: novo.length, dimensao: get(r, 'dimensao'), num: m[1], criterio: m[2], exigibilidade: get(r, 'exigibilidade'),
       disp: get(r, 'disponibilidade'), atual: get(r, 'atualidade'), serie: get(r, 'serie historica'), grav: get(r, 'gravacao de relatorios'), filtros: get(r, 'filtros de pesquisa'),
       evidencias: get(r, 'evidencia').split(/\s+/).filter(Boolean) });
   });
   if (!novo.length) return toast('Nenhum critério encontrado no CSV.');
   const ciclos = [...new Set(novo.map(r => r.ciclo))];
-  if (!await ask('Importar CSV', `<b>${novo.length}</b> critérios do ciclo <b>${ciclos.join(', ')}</b> em <b>${new Set(novo.map(r => r.dimensao)).size}</b> dimensões. Critérios com o mesmo número no mesmo ciclo são atualizados e <b>mantêm o andamento</b>; os novos começam pelo resultado da validação.`, 'Importar')) return;
-  const { data, error } = await sb.from('criteria').upsert(novo, { onConflict: 'ciclo,num' }).select('id,disp,atual,serie,grav,filtros');
+  if (!await ask('Importar CSV', `<b>${novo.length}</b> critérios do ciclo <b>${ciclos.join(', ')}</b> em <b>${new Set(novo.map(r => r.dimensao)).size}</b> dimensões, para <b>${esc(S.mun.nome)}</b>. Critérios com o mesmo número no mesmo ciclo são atualizados e <b>mantêm o andamento</b>; os novos começam pelo resultado da validação.`, 'Importar')) return;
+  const { data, error } = await sb.from('criteria').upsert(novo, { onConflict: 'municipio_id,ciclo,num' }).select('id,disp,atual,serie,grav,filtros');
   if (error) return toast('Erro ao importar: ' + error.message);
-  const tasks = data.map(r => ({ criterio_id: r.id, status: baseOk({ D: r.disp, A: r.atual, S: r.serie, G: r.grav, F: r.filtros }) ? 'concluido' : 'pendente' }));
+  const tasks = data.map(r => ({ criterio_id: r.id, municipio_id: S.mun.id, status: baseOk({ D: r.disp, A: r.atual, S: r.serie, G: r.grav, F: r.filtros }) ? 'concluido' : 'pendente' }));
   const t = await sb.from('tasks').upsert(tasks, { onConflict: 'criterio_id', ignoreDuplicates: true });
   if (t.error) return toast('Critérios importados, mas falhou criar o andamento: ' + t.error.message);
   S.ciclo = ciclos[0]; S.openItems.clear(); S.f = { ...FILTROS }; await loadData(); S.openDims = new Set(S.items.filter(i => i.t.status === 'pendente').map(i => i.dim)); shell(); toast(`${novo.length} critérios importados`);
@@ -470,10 +546,10 @@ function exportCSV() {
   const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`, N = { g: 'atende', r: 'não atende', n: 'não se aplica' };
   const L = ['Dimensão', 'Critério', 'Descrição', 'Exigibilidade', 'D', 'A', 'S', 'G', 'F', 'Status', 'Responsável', 'Prazo', 'Notas', 'Link', 'Atualizado por', 'Atualizado em'];
   const r = S.items.map(i => [i.dim, i.n, i.c, i.e, ...LETTERS.map(k => N[effFlag(i, k)]), ST[i.t.status], nomeDe(i.t.responsavel_id), i.t.prazo, i.t.notas, i.t.link, i.t.updated_by_nome, i.t.updated_at].map(q).join(';'));
-  baixa(`checklist-${S.ciclo}.csv`, '﻿' + [L.map(q).join(';'), ...r].join('\r\n'), 'text/csv');
+  baixa(`checklist-${slug(S.mun.nome) || 'municipio'}-${S.ciclo}.csv`, '﻿' + [L.map(q).join(';'), ...r].join('\r\n'), 'text/csv');
 }
 
-// ---------- usuários (administrador) ----------
+// ---------- usuários (somente o master) ----------
 async function gerencia(acao, dados) {   // chama a Edge Function "gerenciar-usuarios" (roda no servidor, com a chave de serviço)
   const { data, error } = await sb.functions.invoke('gerenciar-usuarios', { body: { acao, ...dados } });
   if (error) {
@@ -498,40 +574,46 @@ async function pedeSenha(nome) {
     $('#po', m.el).onclick = () => { const v = $('#ps', m.el).value; if (v.length < 8) return $('#pe', m.el).textContent = 'A senha precisa ter ao menos 8 caracteres.'; m.close(); res(v); };
   });
 }
-async function openUsuarios() {
-  const m = modal('<div id="ub"><div class="carregando" style="padding:30px">Carregando…</div></div>');
+async function openUsuarios(munId = null) {
+  const m = modal('<div id="ub"><div class="carregando" style="padding:30px">Carregando…</div></div>', () => { if (S.view === 'painel') loadPainel().then(renderPainel).catch(() => {}); });
+  let ls = [], muns = [];
+  const nomeMun = id => (muns.find(x => x.id === id) || {}).nome || '';
   const draw = async () => {
-    const { data, error } = await sb.from('profiles').select('id,nome,email,role,created_at').order('created_at');
-    if (error) return toast(error.message);
-    S.profiles = data.map(({ id, nome, email, role }) => ({ id, nome, email, role }));
-    $('#ub', m.el).innerHTML = `<h2>Usuários da equipe</h2>
-      <table><tr><th>Pessoa</th><th>Perfil</th><th style="text-align:right">Ações</th></tr>
-      ${data.map(u => { const eu = u.id === S.me.id; return `<tr><td><div class="pessoa"><span class="avatar">${esc(iniciais(u.nome))}</span><span>${esc(u.nome)}${eu ? ' (você)' : ''}<small>${esc(u.email)}</small></span></div></td>
-        <td><select data-role="${u.id}" ${eu ? 'disabled title="Você não pode alterar o próprio perfil"' : ''} aria-label="Perfil de ${esc(u.nome)}">${Object.entries(ROLES).map(([k, v]) => `<option value="${k}" ${k === u.role ? 'selected' : ''}>${v}</option>`).join('')}</select></td>
-        <td style="text-align:right;white-space:nowrap"><button class="btn sm" data-pw="${u.id}" title="Definir nova senha">${ico('key')}Senha</button> <button class="btn sm danger" data-del="${u.id}" ${eu ? 'disabled' : ''} title="Excluir usuário" aria-label="Excluir ${esc(u.nome)}">${ico('trash')}</button></td></tr>`; }).join('')}</table>
+    const [p, mu] = await Promise.all([sb.from('profiles').select('id,nome,email,role,municipio_id,created_at').order('nome'), sb.from('municipios').select('id,nome,uf').order('nome')]);
+    if (p.error || mu.error) return toast((p.error || mu.error).message);
+    muns = mu.data; ls = munId ? p.data.filter(u => u.municipio_id === munId) : p.data;
+    const opMun = sel => `<option value="">— sem município —</option>${muns.map(x => `<option value="${x.id}" ${x.id === sel ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}`;
+    $('#ub', m.el).innerHTML = `<h2>${munId ? 'Usuários de ' + esc(nomeMun(munId)) : 'Usuários'}</h2>
+      ${ls.length ? `<div class="tblwrap" style="border:0;box-shadow:none"><table><tr><th>Pessoa</th><th>Município</th><th style="text-align:right">Ações</th></tr>
+      ${ls.map(u => { const eu = u.id === S.me.id, ms = u.role === 'master'; return `<tr><td><div class="pessoa"><span class="avatar">${esc(iniciais(u.nome))}</span><span>${esc(u.nome)}${eu ? ' (você)' : ''}<small>${esc(u.email)}</small></span></div></td>
+        <td>${ms ? '<span class="badge master">Administrador geral</span>' : `<select data-mun="${u.id}" aria-label="Município de ${esc(u.nome)}">${opMun(u.municipio_id)}</select>`}</td>
+        <td style="text-align:right;white-space:nowrap"><button class="btn sm" data-pw="${u.id}" title="Definir nova senha">${ico('key')}Senha</button> <button class="btn sm danger" data-del="${u.id}" ${eu ? 'disabled' : ''} title="Excluir usuário" aria-label="Excluir ${esc(u.nome)}">${ico('trash')}</button></td></tr>`; }).join('')}</table></div>`
+      : '<p style="color:var(--muted)">Nenhum usuário neste município ainda.</p>'}
       <h3>Novo usuário</h3><div class="novo"><form id="nu"><div class="grid2"><div><label class="l" for="un">Nome</label><input id="un" type="text" required autocomplete="off"></div>
         <div><label class="l" for="ue">E-mail</label><input id="ue" type="email" required autocomplete="off"></div>
         <div><label class="l" for="up">Senha inicial (mín. 8)</label><input id="up" type="text" required minlength="8" autocomplete="off"></div>
-        <div><label class="l" for="ur">Perfil</label><select id="ur"><option value="editor">Editor</option><option value="viewer">Somente leitura</option><option value="admin">Administrador</option></select></div></div>
+        <div><label class="l" for="ur">Perfil</label><select id="ur"><option value="municipio">Município</option><option value="master">Administrador geral</option></select></div>
+        <div id="boxm" style="grid-column:1/-1"><label class="l" for="um">Município do usuário <span style="font-weight:400">(ele só verá e editará a ficha deste município)</span></label><select id="um" required><option value="">Escolha o município…</option>${muns.map(x => `<option value="${x.id}" ${x.id === munId ? 'selected' : ''}>${esc(x.nome)}</option>`).join('')}</select></div></div>
         <div class="err" id="ue2"></div><div class="actions"><button class="btn primary" id="uc">${ico('plus')}Criar usuário</button></div></form></div>
-      <p style="font-size:12.5px;color:var(--muted);margin:14px 0 0"><b>Editor</b> altera o checklist · <b>Administrador</b> também importa CSV, zera o progresso e gerencia usuários · <b>Somente leitura</b> só consulta.</p>
+      ${muns.length ? '' : '<p style="font-size:12.5px;color:var(--bad);margin:10px 0 0">Crie um município antes de cadastrar usuários.</p>'}
       <div class="actions" style="justify-content:flex-end"><button class="btn" id="ux">Fechar</button></div>`;
     $('#ux', m.el).onclick = m.close;
+    $('#ur', m.el).onchange = e => { const mu = e.target.value === 'municipio'; $('#boxm', m.el).hidden = !mu; $('#um', m.el).required = mu; };
     $('#nu', m.el).onsubmit = async e => {
       e.preventDefault(); const b = $('#uc', m.el), er = $('#ue2', m.el); b.disabled = true; er.textContent = '';
-      try { await gerencia('criar', { nome: $('#un', m.el).value.trim(), email: $('#ue', m.el).value.trim(), password: $('#up', m.el).value, role: $('#ur', m.el).value }); toast('Usuário criado'); await draw(); }
+      try { await gerencia('criar', { nome: $('#un', m.el).value.trim(), email: $('#ue', m.el).value.trim(), password: $('#up', m.el).value, role: $('#ur', m.el).value, municipio_id: Number($('#um', m.el).value) || null }); toast('Usuário criado'); await draw(); }
       catch (x) { er.textContent = x.message; b.disabled = false; }
     };
   };
   m.el.addEventListener('change', async e => {
-    const id = e.target.dataset.role; if (!id) return;
-    const { error } = await sb.from('profiles').update({ role: e.target.value }).eq('id', id);
+    const id = e.target.dataset.mun; if (!id) return;
+    const { error } = await sb.from('profiles').update({ municipio_id: Number(e.target.value) || null }).eq('id', id);
     if (error) { toast('Erro: ' + error.message); return draw(); }
-    toast('Perfil atualizado'); const p = S.profiles.find(x => x.id === id); if (p) p.role = e.target.value;
+    toast('Município do usuário atualizado'); if (munId) await draw();
   });
   m.el.addEventListener('click', async e => {
     const pw = e.target.closest('[data-pw]'), del = e.target.closest('[data-del]');
-    const uid = pw ? pw.dataset.pw : del ? del.dataset.del : null, u = S.profiles.find(x => x.id === uid);
+    const uid = pw ? pw.dataset.pw : del ? del.dataset.del : null, u = ls.find(x => x.id === uid);
     if (pw && u) { const s = await pedeSenha(u.nome); if (!s) return; try { await gerencia('senha', { id: u.id, password: s }); toast('Senha redefinida'); } catch (x) { toast(x.message); } }
     if (del && u && await ask('Excluir usuário', `Excluir <b>${esc(u.nome)}</b> (${esc(u.email)})? A pessoa perde o acesso. O histórico de alterações dela é mantido.`, 'Excluir', true)) {
       try { await gerencia('excluir', { id: u.id }); toast('Usuário excluído'); await draw(); } catch (x) { toast(x.message); }
@@ -570,7 +652,7 @@ function openRecuperacao() {
   if (!window.supabase) return renderSetup('Não foi possível carregar a biblioteca do Supabase (verifique sua conexão ou bloqueadores de conteúdo).');
   sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
   sb.auth.onAuthStateChange((ev, session) => {
-    if (ev === 'SIGNED_OUT') { S.me = null; S.openItems.clear(); S.f = { ...FILTROS }; if (S.channel) { sb.removeChannel(S.channel); S.channel = null; } renderAuth(); }
+    if (ev === 'SIGNED_OUT') { S.me = null; S.mun = null; S.items = []; S.openItems.clear(); S.f = { ...FILTROS }; if (S.channel) { sb.removeChannel(S.channel); S.channel = null; } renderAuth(); }
     else if (ev === 'PASSWORD_RECOVERY') setTimeout(openRecuperacao, 300);
     else if ((ev === 'SIGNED_IN' || ev === 'INITIAL_SESSION') && session && !S.me) setTimeout(() => boot(session.user), 0);
   });
@@ -578,6 +660,6 @@ function openRecuperacao() {
   if (!data.session) renderAuth();
   document.addEventListener('visibilitychange', async () => {   // ao voltar para a aba, sincroniza (caso o tempo real tenha caído)
     if (document.hidden || !S.me || S.openItems.size || document.querySelector('.overlay')) return;
-    try { await loadData(); renderSummary(); renderList(); } catch {}
+    try { if (S.view === 'painel') { await loadPainel(); renderPainel(); } else if (S.mun) { await loadData(); renderSummary(); renderList(); } } catch {}
   });
 })();

@@ -1,6 +1,6 @@
 # Checklist Transparência Municipal
 
-Checklist colaborativo para a equipe trabalhar, em conjunto, nos critérios da ficha do **Radar da Transparência Pública** (Atricon).
+Checklist para acompanhar os critérios da ficha do **Radar da Transparência Pública** (Atricon), com **uma ficha separada por município**.
 
 - **Front:** site estático (HTML + JS puro) publicado no **GitHub Pages**.
 - **Back:** **Supabase** (login, banco Postgres, regras de acesso, tempo real e uma função para criar usuários). Não há servidor para manter.
@@ -8,20 +8,32 @@ Checklist colaborativo para a equipe trabalhar, em conjunto, nos critérios da f
 ```
 index.html · app.js · style.css · config.js          ← site (GitHub Pages)
 supabase/schema.sql                                  ← tabelas, regras de acesso (RLS) e gatilhos
-supabase/functions/gerenciar-usuarios/index.ts       ← função que permite ao admin criar/excluir usuários
+supabase/functions/gerenciar-usuarios/index.ts       ← função que permite ao master criar/excluir usuários
 dados/modelo-ficha.csv                               ← modelo do CSV da ficha (formato aceito no "Importar CSV")
 ```
 
+## Quem pode o quê
+
+| | **Master** (você) | **Usuário de município** |
+|---|---|---|
+| Vê | todos os municípios | **só o próprio município** |
+| Cria/exclui municípios e usuários, muda senhas | sim | **não** |
+| Importa o CSV da ficha | sim (em qualquer município) | sim, **só no dele** |
+| Marca o checklist (letras D A S G F, status, notas…) | sim | sim, **só no dele** |
+| Zera/apaga a ficha | sim | sim, **só a dele** |
+| Alterar a própria senha e nome | sim | sim |
+
+O isolamento entre municípios é garantido **no banco** (RLS do Postgres), não só na tela: mesmo quem chamasse a API direto não lê nem altera os dados de outro município.
+Cada município importa o **próprio CSV** e pode usar o mesmo ciclo e a mesma numeração dos outros sem conflito.
+
 ## Como funciona
 
-- **O app chega zerado**: não há critério nenhum. O administrador importa o CSV da ficha (botão **Importar CSV**) e cada critério vira um item do checklist.
+- O app **chega zerado**: sem critérios. O usuário do município importa o CSV da ficha (**Importar CSV**) e cada critério vira um item do checklist.
 - Cada critério tem as letras **D A S G F** (Disponibilidade, Atualidade, Série histórica, Gravação, Filtros). Clique na letra para alternar **verde (atende) / vermelho (não atende)**. Letras **cinza** ("não se aplica" na validação) são travadas.
 - O **status** acompanha as letras: todas as aplicáveis verdes ⇒ *Concluído*; reabrir uma letra ⇒ *Em andamento*.
 - Cada critério ainda tem responsável, prazo, notas, link da correção e **histórico** de quem mudou o quê.
-- Tudo é salvo na hora e **aparece para a equipe em tempo real**. O tema padrão é claro (há botão para o escuro).
-- Perfis: **Administrador** (importa CSV, zera/apaga a ficha, cria e gerencia usuários) · **Editor** (altera o checklist) · **Somente leitura**.
-
-> Os dados são **compartilhados por projeto Supabase**: todos os usuários enxergam a mesma ficha. Para outro município/equipe com ficha própria, use outro projeto Supabase (e outro `config.js`).
+- Alterações aparecem para os usuários **do mesmo município** em tempo real. O tema padrão é claro (há botão para o escuro).
+- Se importou o CSV errado: menu → **Zerar ou apagar ficha…** → *Apagar a ficha importada* e importe de novo.
 
 ## Publicar em 6 passos
 
@@ -29,8 +41,10 @@ dados/modelo-ficha.csv                               ← modelo do CSV da ficha 
 Entre em <https://supabase.com>, crie um projeto e guarde a senha do banco.
 
 ### 2) Criar as tabelas
-Abra **SQL Editor → New query**, cole **todo** o conteúdo de `supabase/schema.sql` e clique em **Run**.
-(Pode ser executado de novo sem perder dados. **Não há carga de dados**: a ficha é importada pelo app.)
+**SQL Editor → New query**, cole **todo** o `supabase/schema.sql` e clique em **Run**.
+O script serve para instalar do zero **e** para atualizar um banco que já usava a versão anterior (idempotente).
+> Ao atualizar a versão antiga (ficha única), a ficha antiga é **removida** (ela não pertencia a nenhum município) e o app passa a chegar zerado.
+> Os usuários continuam: o primeiro vira **master**; os demais ficam sem município até você vincular.
 
 ### 3) Configurar o site
 Em **Project Settings → API Keys** copie a **Project URL** e a chave **anon / publishable** para o `config.js`:
@@ -42,49 +56,32 @@ window.APP_CONFIG = {
 };
 ```
 
-> Essa chave é pública por desenho: quem protege os dados são as regras RLS do `schema.sql`
-> (sem login, nada é lido ou gravado). **Nunca** use a chave `secret` / `service_role` no site.
+> Essa chave é pública por desenho: quem protege os dados são as regras RLS do `schema.sql`. **Nunca** use a chave `secret` / `service_role` no site.
 
 ### 4) Publicar no GitHub Pages
-No repositório: **Settings → Pages → Source: *Deploy from a branch* → Branch: `main` / `(root)` → Save.**
-O site fica em `https://SEU-USUARIO.github.io/transparencia-municipal/`.
-No Supabase, em **Authentication → URL Configuration**, coloque essa URL em **Site URL** e em **Redirect URLs**.
+**Settings → Pages → Source: *Deploy from a branch* → Branch: `main` / `(root)` → Save.**
+No Supabase, em **Authentication → URL Configuration**, coloque a URL do site em **Site URL** e em **Redirect URLs** (usada no "esqueci a senha").
 
 ### 5) Publicar a função que cria usuários
-É o que permite ao administrador **criar usuários direto no app** (a chave de serviço fica só no servidor do Supabase).
-
 1. Supabase → **Edge Functions → Deploy a new function → Via Editor**.
-2. Nome da função: `gerenciar-usuarios` (exatamente assim).
-3. Apague o exemplo, cole **todo** o conteúdo de `supabase/functions/gerenciar-usuarios/index.ts` e clique em **Deploy function**.
+2. Nome: `gerenciar-usuarios` (exatamente assim).
+3. Apague o exemplo, cole **todo** o `supabase/functions/gerenciar-usuarios/index.ts` e clique em **Deploy function**.
 
-Sem esse passo o app funciona normalmente; só o botão "Criar usuário" mostra um aviso de que a função não foi publicada
-(as pessoas ainda podem criar a própria conta pela tela de login, e o admin ajusta o perfil).
+(Se já tinha publicado a versão anterior, **substitua o código** pelo atual e faça Deploy de novo.)
 
-### 6) Primeiro acesso
-1. Abra o site, clique em **Criar conta** e use a sua. **O primeiro usuário vira Administrador automaticamente.**
-2. Se o e-mail de confirmação atrapalhar, desligue **Confirm email** em **Authentication → Providers → Email**.
-3. Clique em **Importar CSV** e escolha a ficha (use **Baixar modelo de CSV** para ver o formato).
-4. Abra o menu (seu nome, no canto) → **Usuários** → **Novo usuário** para cadastrar a equipe (nome, e-mail, senha inicial e perfil).
+### 6) Primeiro acesso e cadastro dos municípios
+1. **Seu usuário master:** o primeiro usuário do projeto vira master automaticamente. Num projeto novo, crie-o em **Authentication → Users → Add user → Create new user** (marque *Auto Confirm User*).
+2. Entre no site: você cai no **Painel de municípios**. Clique em **Novo município** (ex.: *Mathias Lobato / MG*).
+3. Clique no ícone de usuários do município (ou **Usuários** no topo) → **Novo usuário**: nome, e-mail, senha inicial e o município. Repita para cada município.
+4. Passe o link e a senha para cada município. Ele entra direto na própria ficha, clica em **Importar CSV** e começa a marcar.
+5. Recomendado: em **Authentication → Providers → Email**, desligue **Allow new users to sign up** (só você cria contas). O site não tem tela de cadastro.
 
 ## Formato do CSV
 
 Separador `;` e as colunas:
 `ciclo, dimensao, criterio, exigibilidade, Disponibilidade, Atualidade, Série Histórica, Gravação de Relatórios, Filtros de Pesquisa, autoavaliacao, evidencia`
 (veja `dados/modelo-ficha.csv`). Cada letra vale `atende`, `não atende` ou `não se aplica`; o critério começa com o número (`1.1 Possui…`).
-
 Importar de novo atualiza os critérios de mesmo número **mantendo o andamento**. Quando há mais de um ciclo, aparece um seletor no cabeçalho.
-Para recomeçar: menu → **Zerar ou apagar ficha…** (limpar progresso, voltar ao resultado do CSV ou apagar a ficha inteira).
-
-## Segurança (o que o banco garante)
-
-| Quem | Lê | Altera andamento | Importa/apaga ficha | Gerencia usuários |
-|---|---|---|---|---|
-| Sem login | — | — | — | — |
-| Somente leitura | sim | não | não | não |
-| Editor | sim | sim | não | não |
-| Administrador | sim | sim | sim | sim |
-
-Ninguém consegue promover a si mesmo. A função `gerenciar-usuarios` confere no servidor que quem chama é administrador.
 
 ## Desenvolvimento local
 

@@ -1,4 +1,4 @@
-// Edge Function "gerenciar-usuarios" — permite que um ADMINISTRADOR crie usuários, redefina senhas e exclua usuários.
+// Edge Function "gerenciar-usuarios" — permite que o MASTER crie usuários (vinculados a um município), redefina senhas e exclua usuários.
 // Roda no servidor do Supabase (usa a chave service_role, que NUNCA vai para o site).
 // Publicação: Supabase → Edge Functions → Deploy a new function → Via Editor → nome "gerenciar-usuarios" → colar este arquivo → Deploy.
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -11,7 +11,7 @@ const cors = {
 const json = (body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 
-const ROLES = ["admin", "editor", "viewer"];
+const ROLES = ["master", "municipio"];
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 Deno.serve(async (req) => {
@@ -28,10 +28,10 @@ Deno.serve(async (req) => {
     const { data: u, error: ue } = await caller.auth.getUser();
     if (ue || !u?.user) return json({ error: "Não autenticado" }, 401);
 
-    // 2) é administrador?
+    // 2) é o master?
     const admin = createClient(url, service, { auth: { persistSession: false, autoRefreshToken: false } });
     const { data: me } = await admin.from("profiles").select("role").eq("id", u.user.id).maybeSingle();
-    if (me?.role !== "admin") return json({ error: "Apenas administradores podem gerenciar usuários." }, 403);
+    if (me?.role !== "master") return json({ error: "Apenas o administrador geral (master) pode gerenciar usuários." }, 403);
 
     const b = await req.json().catch(() => ({}));
 
@@ -39,10 +39,16 @@ Deno.serve(async (req) => {
       const email = String(b.email ?? "").trim().toLowerCase();
       const nome = String(b.nome ?? "").trim();
       const password = String(b.password ?? "");
-      const role = ROLES.includes(b.role) ? b.role : "viewer";
+      const role = ROLES.includes(b.role) ? b.role : "municipio";
+      const municipio_id = role === "municipio" ? Number(b.municipio_id) || null : null;
       if (!nome) return json({ error: "Informe o nome." }, 400);
       if (!EMAIL.test(email)) return json({ error: "E-mail inválido." }, 400);
       if (password.length < 8) return json({ error: "A senha precisa ter ao menos 8 caracteres." }, 400);
+      if (role === "municipio") {
+        if (!municipio_id) return json({ error: "Escolha o município do usuário." }, 400);
+        const { data: m } = await admin.from("municipios").select("id").eq("id", municipio_id).maybeSingle();
+        if (!m) return json({ error: "Município não encontrado." }, 400);
+      }
 
       const { data, error } = await admin.auth.admin.createUser({
         email, password, email_confirm: true, user_metadata: { nome },
@@ -51,8 +57,8 @@ Deno.serve(async (req) => {
         const dup = /already|registered|exists/i.test(error.message);
         return json({ error: dup ? "Já existe um usuário com esse e-mail." : error.message }, dup ? 409 : 400);
       }
-      // o gatilho já cria o perfil (como "viewer"); aqui ajustamos nome e papel
-      const { error: pe } = await admin.from("profiles").upsert({ id: data.user.id, nome, email, role });
+      // o gatilho já cria o perfil; aqui ajustamos nome, papel e município
+      const { error: pe } = await admin.from("profiles").upsert({ id: data.user.id, nome, email, role, municipio_id });
       if (pe) return json({ error: "Usuário criado, mas falhou ajustar o perfil: " + pe.message }, 500);
       return json({ ok: true, id: data.user.id });
     }
